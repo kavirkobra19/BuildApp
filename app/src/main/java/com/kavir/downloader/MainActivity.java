@@ -20,6 +20,7 @@ import android.widget.Toast;
 
 import com.yausername.youtubedl_android.YoutubeDL;
 import com.yausername.youtubedl_android.YoutubeDLException;
+import com.yausername.youtubedl_android.YoutubeDL.UpdateChannel;
 import com.yausername.youtubedl_android.YoutubeDLRequest;
 import com.yausername.ffmpeg.FFmpeg;
 
@@ -47,6 +48,7 @@ public class MainActivity extends Activity {
             try {
                 YoutubeDL.getInstance().init(getApplication());
                 FFmpeg.getInstance().init(getApplication());
+                try { YoutubeDL.getInstance().updateYoutubeDL(getApplication(), UpdateChannel.NIGHTLY); } catch (Exception ignored) { /* Keep the bundled engine if update is unavailable. */ }
                 mediaEngineReady = true;
                 runOnUiThread(() -> setStatus("READY · yt-dlp media engine initialized", false));
             } catch (Exception e) {
