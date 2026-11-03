@@ -21,7 +21,6 @@ import android.widget.Toast;
 import com.yausername.youtubedl_android.YoutubeDL;
 import com.yausername.youtubedl_android.YoutubeDLException;
 import com.yausername.youtubedl_android.YoutubeDLRequest;
-import com.yausername.youtubedl_android.UpdateChannel;
 import com.yausername.ffmpeg.FFmpeg;
 
 import java.io.File;
@@ -49,15 +48,8 @@ public class MainActivity extends Activity {
                 YoutubeDL.getInstance().init(getApplication());
                 FFmpeg.getInstance().init(getApplication());
                 mediaEngineReady = true;
-                runOnUiThread(() -> setStatus("UPDATING · Checking for the latest stable yt-dlp engine…", false));
-                try {
-                    YoutubeDL.getInstance().updateYoutubeDL(
-                            getApplication(), UpdateChannel.STABLE);
-                    runOnUiThread(() -> setStatus("READY · yt-dlp stable engine is up to date", false));
-                } catch (Exception updateError) {
-                    runOnUiThread(() -> setStatus(
-                            "READY · Using bundled yt-dlp; update unavailable · " + errorText(updateError), true));
-                }
+                runOnUiThread(() -> setStatus(
+                        "READY · yt-dlp + FFmpeg initialized (bundled engine)", false));
             } catch (Exception e) {
                 mediaEngineReady = false;
                 runOnUiThread(() -> setStatus("MEDIA ENGINE ERROR · " + errorText(e), true));
