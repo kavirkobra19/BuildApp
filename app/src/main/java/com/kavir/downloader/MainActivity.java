@@ -18,6 +18,12 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.yausername.youtubedl_android.YoutubeDL;
+import com.yausername.youtubedl_android.YoutubeDLException;
+import com.yausername.youtubedl_android.YoutubeDLRequest;
+import com.yausername.ffmpeg.FFmpeg;
+
+import java.io.File;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
@@ -26,11 +32,28 @@ public class MainActivity extends Activity {
     private EditText urlInput;
     private TextView status;
     private android.content.SharedPreferences prefs;
+    private boolean mediaEngineReady = false;
+    private volatile boolean downloading = false;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         prefs = getSharedPreferences("kavir_downloader", MODE_PRIVATE);
         buildUi();
+        initializeMediaEngine();
+    }
+
+    private void initializeMediaEngine() {
+        new Thread(() -> {
+            try {
+                YoutubeDL.getInstance().init(getApplication());
+                FFmpeg.getInstance().init(getApplication());
+                mediaEngineReady = true;
+                runOnUiThread(() -> setStatus("READY · yt-dlp media engine initialized", false));
+            } catch (Exception e) {
+                mediaEngineReady = false;
+                runOnUiThread(() -> setStatus("MEDIA ENGINE ERROR · " + errorText(e), true));
+            }
+        }).start();
     }
 
     private void buildUi() {
@@ -54,7 +77,7 @@ public class MainActivity extends Activity {
         title.setPadding(0, dp(18), 0, dp(8)); root.addView(title);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Paste a media or file link. Direct files are downloaded by Android.");
+        subtitle.setText("Paste a supported media link or a direct file URL.");
         subtitle.setTextColor(MUTED); subtitle.setTextSize(14); root.addView(subtitle);
 
         TextView inputLabel = label("SOURCE URL");
@@ -63,7 +86,7 @@ public class MainActivity extends Activity {
         urlInput = new EditText(this);
         urlInput.setSingleLine(true); urlInput.setTextColor(WHITE);
         urlInput.setHintTextColor(0xFF8E849B);
-        urlInput.setHint("https://example.com/video.mp4"); urlInput.setTextSize(14);
+        urlInput.setHint("https://..."); urlInput.setTextSize(14);
         urlInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         urlInput.setPadding(dp(14), dp(13), dp(14), dp(13));
         urlInput.setBackgroundColor(PANEL);
@@ -79,12 +102,12 @@ public class MainActivity extends Activity {
         save.setOnClickListener(v -> startDownload(true)); addGap(root, 8); root.addView(save, fullWidth());
 
         status = new TextView(this);
-        status.setText("READY · Waiting for a link"); status.setTextColor(MUTED);
+        status.setText("STARTING MEDIA ENGINE…"); status.setTextColor(MUTED);
         status.setTextSize(13); status.setPadding(dp(14), dp(16), dp(14), dp(16));
         status.setBackgroundColor(PANEL); addGap(root, 18); root.addView(status, fullWidth());
 
         TextView note = new TextView(this);
-        note.setText("DIRECT DOWNLOADS\\nHTTP / HTTPS file URLs\\n\\nPLATFORM LINKS\\nYouTube · Instagram · TikTok · Spotify · Pinterest\\nA webpage link is not a media-file URL. Platform extraction is not enabled in this build. Spotify protected audio and DRM content are not downloadable.");
+        note.setText("MEDIA ENGINE\\nyt-dlp + FFmpeg\\n\\nSUPPORTED SOURCES\\nYouTube · Instagram · TikTok · Pinterest · Direct media URLs\\n\\nSpotify DRM-protected tracks cannot be exported. Only download content you own or have permission to save.");
         note.setTextColor(MUTED); note.setTextSize(12); note.setLineSpacing(dp(4), 1f);
         note.setPadding(dp(14), dp(16), dp(14), dp(16)); note.setBackgroundColor(PANEL);
         addGap(root, 14); root.addView(note, fullWidth());
@@ -93,7 +116,7 @@ public class MainActivity extends Activity {
         settings.setOnClickListener(v -> showSettings()); addGap(root, 20); root.addView(settings, fullWidth());
 
         TextView footer = new TextView(this);
-        footer.setText("KAVIR DOWNLOADER  •  v1.0.1");
+        footer.setText("KAVIR DOWNLOADER  •  v1.1.0");
         footer.setTextColor(0xFF756B80); footer.setTextSize(10);
         footer.setGravity(Gravity.CENTER); footer.setPadding(0, dp(26), 0, 0);
         root.addView(footer, fullWidth());
@@ -105,49 +128,103 @@ public class MainActivity extends Activity {
         if (!isHttpUrl(value)) { setStatus("INVALID URL · Enter a valid http:// or https:// address", true); return; }
         String host = Uri.parse(value).getHost().toLowerCase(Locale.ROOT);
         String platform = platformName(host);
-        if (platform != null) setStatus(platform + " LINK · This is a webpage, not a direct media file. An authorized direct media URL is needed.", true);
-        else setStatus("DIRECT LINK · URL format looks valid. The server must provide a downloadable file.", false);
+        if ("SPOTIFY".equals(platform)) {
+            setStatus("SPOTIFY · Protected music cannot be downloaded as audio. Open the track in Spotify.", true);
+        } else if (platform != null) {
+            setStatus(platform + " LINK · yt-dlp will try to extract available media formats.", false);
+        } else {
+            setStatus("DIRECT LINK · Ready to download if the server allows file access.", false);
+        }
     }
 
     private void startDownload(boolean gallery) {
         String value = urlInput.getText().toString().trim();
         if (!isHttpUrl(value)) { setStatus("INVALID URL · Check the address first", true); return; }
+        if (downloading) { setStatus("DOWNLOAD IN PROGRESS · Please wait", true); return; }
         String host = Uri.parse(value).getHost().toLowerCase(Locale.ROOT);
         String platform = platformName(host);
-        if (platform != null) {
-            setStatus(platform + " LINK · This page cannot be downloaded as a file. Paste an authorized direct media URL.", true);
+        if ("SPOTIFY".equals(platform)) {
+            setStatus("SPOTIFY · DRM-protected tracks are not exportable. Use Spotify's official offline feature.", true);
             return;
         }
+        if (platform != null) {
+            if (!mediaEngineReady) { setStatus("MEDIA ENGINE NOT READY · Wait for initialization or reopen the app", true); return; }
+            downloadWithYtDlp(value, gallery);
+        } else {
+            downloadDirect(value, gallery);
+        }
+    }
+
+    private void downloadWithYtDlp(String url, boolean gallery) {
+        downloading = true;
+        setStatus("ANALYZING · yt-dlp is checking available formats…", false);
+        new Thread(() -> {
+            try {
+                File outputDir = new File(Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOWNLOADS), "KavirDownloader");
+                if (!outputDir.exists() && !outputDir.mkdirs()) {
+                    throw new IllegalStateException("Cannot create Downloads/KavirDownloader");
+                }
+
+                YoutubeDLRequest request = new YoutubeDLRequest(url);
+                request.addOption("-f", "best[ext=mp4]/best");
+                request.addOption("--merge-output-format", "mp4");
+                request.addOption("--no-playlist");
+                request.addOption("--newline");
+                request.addOption("--no-mtime");
+                request.addOption("--retries", "5");
+                request.addOption("--fragment-retries", "5");
+                request.addOption("-o", new File(outputDir, "%(title).150B.%(ext)s").getAbsolutePath());
+
+                YoutubeDL.getInstance().execute(request, (progress, etaInSeconds) -> {
+                    runOnUiThread(() -> setStatus(
+                            "DOWNLOADING · " + Math.round(progress) + "% · ETA " + etaInSeconds + "s", false));
+                });
+
+                runOnUiThread(() -> {
+                    downloading = false;
+                    setStatus("DOWNLOAD COMPLETE · Check Downloads/KavirDownloader", false);
+                    Toast.makeText(this, "Download complete", Toast.LENGTH_LONG).show();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    downloading = false;
+                    setStatus("YT-DLP ERROR · " + errorText(e), true);
+                });
+            }
+        }).start();
+    }
+
+    private void downloadDirect(String value, boolean gallery) {
         try {
             String fileName = URLUtil.guessFileName(value, null, null);
             if (fileName == null || fileName.trim().isEmpty()) fileName = "download.bin";
             String lower = fileName.toLowerCase(Locale.ROOT);
-            boolean image = lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") ||
-                    lower.endsWith(".webp") || lower.endsWith(".gif");
-            boolean video = lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".webm") ||
-                    lower.endsWith(".3gp") || lower.endsWith(".mov");
+            boolean image = lower.endsWith(".jpg") || lower.endsWith(".jpeg") ||
+                    lower.endsWith(".png") || lower.endsWith(".webp") || lower.endsWith(".gif");
+            boolean video = lower.endsWith(".mp4") || lower.endsWith(".mkv") ||
+                    lower.endsWith(".webm") || lower.endsWith(".3gp") || lower.endsWith(".mov");
             String folder = gallery ? (image ? Environment.DIRECTORY_PICTURES :
                     (video ? Environment.DIRECTORY_MOVIES : Environment.DIRECTORY_DOWNLOADS)) :
                     Environment.DIRECTORY_DOWNLOADS;
-            String subfolder = gallery ? "KavirDownloader" : "KavirDownloader";
             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(value));
             request.setTitle(fileName);
             request.setDescription(gallery ? "Saving with Kavir Downloader" : "Downloading with Kavir Downloader");
             request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-            request.setDestinationInExternalPublicDir(folder, subfolder + "/" + fileName);
-            request.setAllowedOverMetered(true); request.setAllowedOverRoaming(false);
+            request.setDestinationInExternalPublicDir(folder, "KavirDownloader/" + fileName);
+            request.setAllowedOverMetered(true);
+            request.setAllowedOverRoaming(false);
             DownloadManager manager = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
             if (manager == null) throw new IllegalStateException("Download service unavailable");
             manager.enqueue(request);
-            setStatus((gallery ? "SAVING TO PUBLIC MEDIA FOLDER · " : "DOWNLOAD QUEUED · ") + fileName, false);
-            Toast.makeText(this, gallery ? "Save started" : "Download added", Toast.LENGTH_SHORT).show();
+            setStatus((gallery ? "SAVING · " : "DOWNLOAD QUEUED · ") + fileName, false);
         } catch (Exception e) {
-            setStatus("DOWNLOAD ERROR · " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()), true);
+            setStatus("DOWNLOAD ERROR · " + errorText(e), true);
         }
     }
 
     private String platformName(String host) {
-        if (host.equals("youtu.be") || host.endsWith("youtube.com")) return "YOUTUBE";
+        if (host.equals("youtu.be") || host.endsWith("youtube.com") || host.endsWith("youtube-nocookie.com")) return "YOUTUBE";
         if (host.endsWith("instagram.com")) return "INSTAGRAM";
         if (host.endsWith("tiktok.com")) return "TIKTOK";
         if (host.endsWith("spotify.com") || host.equals("spotify.link")) return "SPOTIFY";
@@ -163,7 +240,7 @@ public class MainActivity extends Activity {
         profile.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         profile.setMinLines(3); profile.setPadding(dp(12), dp(10), dp(12), dp(10));
         new AlertDialog.Builder(this).setTitle("Proxy profile")
-                .setMessage("This version only stores your profile locally. It does not start Xray/V2Ray or route app traffic yet.")
+                .setMessage("Proxy profile storage only. Xray/V2Ray connection is not enabled in this build.")
                 .setView(profile).setNegativeButton("CANCEL", null)
                 .setNeutralButton("CLEAR", (d, w) -> prefs.edit().remove("proxy_profile").apply())
                 .setPositiveButton("SAVE", (d, w) -> {
@@ -181,8 +258,15 @@ public class MainActivity extends Activity {
         Uri uri = Uri.parse(value);
         return uri.getHost() != null && uri.getHost().contains(".");
     }
+    private String errorText(Exception e) {
+        String message = e.getMessage();
+        return message == null || message.trim().isEmpty() ? e.getClass().getSimpleName() : message;
+    }
     private void setStatus(String message, boolean error) {
-        status.setText(message); status.setTextColor(error ? 0xFFFF7777 : 0xFFBDA1FF);
+        if (status != null) {
+            status.setText(message);
+            status.setTextColor(error ? 0xFFFF7777 : 0xFFBDA1FF);
+        }
     }
     private TextView label(String value) {
         TextView view = new TextView(this); view.setText(value); view.setTextColor(PURPLE);
