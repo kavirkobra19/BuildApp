@@ -20,7 +20,6 @@ import android.widget.Toast;
 
 import com.yausername.youtubedl_android.YoutubeDL;
 import com.yausername.youtubedl_android.YoutubeDLException;
-import com.yausername.youtubedl_android.YoutubeDL.UpdateChannel;
 import com.yausername.youtubedl_android.YoutubeDLRequest;
 import com.yausername.ffmpeg.FFmpeg;
 
@@ -48,7 +47,6 @@ public class MainActivity extends Activity {
             try {
                 YoutubeDL.getInstance().init(getApplication());
                 FFmpeg.getInstance().init(getApplication());
-                try { YoutubeDL.getInstance().updateYoutubeDL(getApplication(), UpdateChannel.NIGHTLY); } catch (Exception ignored) { /* Keep the bundled engine if update is unavailable. */ }
                 mediaEngineReady = true;
                 runOnUiThread(() -> setStatus("READY · yt-dlp media engine initialized", false));
             } catch (Exception e) {
@@ -118,7 +116,7 @@ public class MainActivity extends Activity {
         settings.setOnClickListener(v -> showSettings()); addGap(root, 20); root.addView(settings, fullWidth());
 
         TextView footer = new TextView(this);
-        footer.setText("KAVIR DOWNLOADER  •  v1.1.0");
+        footer.setText("KAVIR DOWNLOADER  •  v1.1.2");
         footer.setTextColor(0xFF756B80); footer.setTextSize(10);
         footer.setGravity(Gravity.CENTER); footer.setPadding(0, dp(26), 0, 0);
         root.addView(footer, fullWidth());
@@ -178,7 +176,7 @@ public class MainActivity extends Activity {
                 request.addOption("--fragment-retries", "5");
                 request.addOption("-o", new File(outputDir, "%(title).150B.%(ext)s").getAbsolutePath());
 
-                YoutubeDL.getInstance().execute(request, (progress, etaInSeconds) -> {
+                YoutubeDL.getInstance().execute(request, null, (progress, etaInSeconds) -> {
                     runOnUiThread(() -> setStatus(
                             "DOWNLOADING · " + Math.round(progress) + "% · ETA " + etaInSeconds + "s", false));
                 });
