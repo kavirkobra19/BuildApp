@@ -176,9 +176,10 @@ public class MainActivity extends Activity {
                 request.addOption("--fragment-retries", "5");
                 request.addOption("-o", new File(outputDir, "%(title).150B.%(ext)s").getAbsolutePath());
 
-                YoutubeDL.getInstance().execute(request, null, (progress, etaInSeconds) -> {
+                YoutubeDL.getInstance().execute(request, null, (progress, etaInSeconds, output) -> {
                     runOnUiThread(() -> setStatus(
                             "DOWNLOADING · " + Math.round(progress) + "% · ETA " + etaInSeconds + "s", false));
+                    return kotlin.Unit.INSTANCE;
                 });
 
                 runOnUiThread(() -> {
