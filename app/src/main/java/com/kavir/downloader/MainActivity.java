@@ -103,8 +103,10 @@ public class MainActivity extends Activity {
 
         status = new TextView(this);
         status.setText("STARTING MEDIA ENGINE…"); status.setTextColor(MUTED);
-        status.setTextSize(13); status.setPadding(dp(14), dp(16), dp(14), dp(16));
-        status.setBackgroundColor(PANEL); addGap(root, 18); root.addView(status, fullWidth());
+        status.setTextSize(12); status.setPadding(dp(14), dp(16), dp(14), dp(16));
+        status.setMinHeight(dp(52)); status.setMaxLines(6); status.setTextIsSelectable(true);
+        status.setBackgroundColor(PANEL); addGap(root, 18);
+        root.addView(status, new LinearLayout.LayoutParams(-1, -2));
 
         TextView note = new TextView(this);
         note.setText("MEDIA ENGINE\\nyt-dlp + FFmpeg\\n\\nSUPPORTED SOURCES\\nYouTube · Instagram · TikTok · Pinterest · Direct media URLs\\n\\nSpotify DRM-protected tracks cannot be exported. Only download content you own or have permission to save.");
@@ -177,8 +179,11 @@ public class MainActivity extends Activity {
                 request.addOption("-o", new File(outputDir, "%(title).150B.%(ext)s").getAbsolutePath());
 
                 YoutubeDL.getInstance().execute(request, null, (progress, etaInSeconds, output) -> {
-                    runOnUiThread(() -> setStatus(
-                            "DOWNLOADING · " + Math.round(progress) + "% · ETA " + etaInSeconds + "s", false));
+                    runOnUiThread(() -> {
+                        String detail = output == null ? "" : output.trim();
+                        if (detail.isEmpty()) detail = "Downloading…";
+                        setStatus("DOWNLOADING · " + Math.round(progress) + "% · ETA " + etaInSeconds + "s\\n" + detail, false);
+                    });
                     return kotlin.Unit.INSTANCE;
                 });
 
